@@ -1,48 +1,152 @@
-// Initialize sockets
-
 let initiator = false;
 let config = null;
-console.log('Running index.js')
-
-const socket = io.connect('http://localhost:3000');
-const input = document.getElementById('input');
-
-input.addEventListener('click', () => {
-    // socket.emit('message', 'Hi there!');
-    dataChannel.send('Wait....whats up bitch????')
-})
-
-socket.on('message', (input) => {
-    // console.log('Message received:', input);
-    signalingMessageCallback(input);
-})
-
-socket.on('created', () => {
-    initiator = true;
-    // console.log('I created the room')
-})
-
-socket.on('joined', () => {
-    // initiator = false;
-    // console.log('Im the second to join')
-    createPeerConnection();
-})
-
-socket.on('ready', () => {
-    // console.log('Now I know the server is ready')
-    createPeerConnection();
-})
-
+images = document.getElementById('images');
+let partnerID;
+let downloaded = false;
 let pc;
 let dataChannel;
 
-createPeerConnection = () => {
+const socket = io.connect('http://ec2-18-188-104-222.us-east-2.compute.amazonaws.com:3000');
+
+socket.on('message', (input) => {
+    signalingMessageCallback(input);
+})
+
+socket.on('fromServer', () => {
+    console.log('Getting images from server');
+    getImagesFromServer();
+})
+
+socket.on('receiver', (senderID) => {
+    console.log('Time for me to receive');
+    partnerID = senderID;
+    createPeerConnection();
+})
+
+socket.on('sender', (receiverID) => {
+    console.log('Time for me to send');
+    partnerID = receiverID;
+    initiator = true;
+    createPeerConnection();
+})
+
+socket.on('needData', () => {
+    socket.emit('needData', downloaded);
+})
+
+////////////////////////////////////////////////////// Photo functions //////////////////////////////////////////////////////
+
+var results = document.getElementById('results');
+fetch('/images', {
+    method: 'GET',
+    headers: {
+        'Content-Type': 'application/json'
+    }
+}).then((response) => {
+    return response.json();
+}).then((myjson) => {
+    for (let i = 0; i < myjson.length; i++) {
+        var div = document.createElement('div');
+        var image = document.createElement('img');
+        image.src = myjson[i];
+        image.className = 'images';
+        div.appendChild(image);
+        results.append(div);
+    }//end for
+});
+
+let imageNames = ['cliff', 'gooddog', 'lava', 'ocean'];
+
+for (let i = 0; i < imageNames.length; i++) {
+    let div = document.createElement('div');
+    let image = document.createElement('img');
+    image.setAttribute('id', imageNames[i]);
+    image.setAttribute('data-p2p', 'http://ec2-18-188-104-222.us-east-2.compute.amazonaws.com:3000/images/' + imageNames[i]);
+    image.setAttribute('crossOrigin', 'anonymous');
+    div.appendChild(image);
+    images.append(div);
+}
+
+let imageArray = Object.values(document.getElementsByTagName('img'));
+imageArray = imageArray.filter(image => image.hasAttribute('data-p2p'));
+
+/// For base initiator
+function getImagesFromServer() {
+    imageArray.forEach(image => {
+        image.setAttribute('src', (image.getAttribute('data-p2p')))
+    })
+    readyToSend();
+}
+
+function sendAllPhotos() {
+    // dataChannel.send('starting');
+    imageArray.forEach(image => {
+        console.log('Sending', image.id);
+        sendPhoto(image);
+    })
+    dataChannel.send('all-done');
+    readyToSend();
+}
+
+function sendPhoto(image) {
+    const data = getImageData(image);
+    // console.log('Image data is:', data);
+    const CHUNK_LEN = 64000;
+    const totalChunks = data.length / CHUNK_LEN;
+    // console.log('This many chunks to send:', totalChunks);
+
+    let start;
+    let end;
+    for (let i = 0; i < totalChunks; i++) {
+        // console.log('Sending chunk', i);
+        start = i * CHUNK_LEN;
+        end = (i + 1) * CHUNK_LEN;
+        dataChannel.send(data.slice(start, end));
+    }
+    dataChannel.send('finished');
+    // console.log('Finished sending that photo');
+}
+
+function getImageData(image) {
+    let canvas = document.createElement('canvas');
+    let context = canvas.getContext('2d');
+    context.canvas.width = image.width;
+    context.canvas.height = image.height;
+    context.drawImage(image, 0, 0, image.width, image.height);
+    return canvas.toDataURL('image/jpeg')
+}
+
+function receiveData() {
+    let imageData = '';
+    let counter = 0;
+    let dataString;
+    return function onMessage(message) {
+        dataString = message.data.toString();
+        if (dataString.slice(0, 8) == 'finished') {
+            setImage(imageData, counter);
+            counter++;
+            imageData = '';
+        } else if (dataString.slice(0, 7) === 'all-done') {
+            readyToSend();
+        } else {
+            imageData += dataString;
+        }
+    }
+}
+
+function setImage(imageData, counter) {
+    // console.log('In setImage');
+    imageArray[counter].src = imageData;
+}
+
+////////////////////////////////////////////////////// Signaling functions //////////////////////////////////////////////////////
+
+function createPeerConnection() {
     console.log('Creating peer connection!');
     pc = new RTCPeerConnection(config);
     pc.onicecandidate = (event) => {
-        console.log('onicecandidate triggered!');
         if (event.candidate) {
-            console.log('onicecandidate event is:', event.candidate);
+            // console.log('onicecandidate event is:', event.candidate);
             sendMessage({
                 type: 'candidate',
                 label: event.candidate.sdpMLineIndex,
@@ -50,9 +154,10 @@ createPeerConnection = () => {
                 candidate: event.candidate.candidate
             })
         }
-        else console.log('Out of candidates');
+        // else console.log('Out of candidates');
     }
     if (initiator) {
+        console.log('I am sending!');
         // Create the data channel, label it messages
         dataChannel = pc.createDataChannel('messages');
         // Set up handlers for new data channel
@@ -63,6 +168,7 @@ createPeerConnection = () => {
         pc.createOffer(onLocalDescription, logError);
     }
     else {
+        console.log('I am receiving!');
         // Create an ondatachannel handler to respond
         // when the data channel from the other client arrives
         pc.ondatachannel = (event) => {
@@ -72,80 +178,56 @@ createPeerConnection = () => {
     }
 }
 
-signalingMessageCallback = (message) => {
+function signalingMessageCallback(message) {
     if (message.type === 'candidate') {
         // console.log('Received icecandidate:', message.candidate);
         pc.addIceCandidate(new RTCIceCandidate({ candidate: message.candidate }));
-        console.log('After ice, RD sdp is:', pc.remoteDescription.sdp)
     }
     else if (message.type === 'answer') {
-        console.log('Received answer:', message);
+        // console.log('Received answer:', message);
         pc.setRemoteDescription(new RTCSessionDescription(message), () => { }, logError);
-        console.log('After answer, RD sdp is:', pc.remoteDescription.sdp)
     }
     else if (message.type === 'offer') {
-        console.log('Received offer:', message);
+        // console.log('Received offer:', message);
         pc.setRemoteDescription(new RTCSessionDescription(message), () => { }, logError)
-        console.log('After offer, RD sdp is:', pc.remoteDescription.sdp);
         pc.createAnswer(onLocalDescription, logError);
     }
 }
 
-onDataChannelCreated = channel => {
-    console.log('Called onDataChannelCreated');
+function onDataChannelCreated(channel) {
     channel.onopen = () => {
-        console.log('Channel opened');
+        // console.log('Channel opened');
+        if (initiator) {
+            sendAllPhotos();
+        }
     }
 
     channel.onclose = () => {
-        console.log('Channel closed');
+        // console.log('Channel closed');
     }
 
-    channel.onmessage = message => {
-        console.log('Received this message through WebRTC:', message.data);
-    }
+    channel.onmessage = receiveData();
 }
 
-onLocalDescription = desc => {
+function onLocalDescription(desc) {
     pc.setLocalDescription(desc, () => {
-        console.log('Sending local description:', pc.localDescription);
+        // console.log('Sending local description:', pc.localDescription);
         sendMessage(pc.localDescription)
     }, logError);
 }
 
-sendMessage = message => {
-    socket.emit('message', message);
+////////////////////////////////////////////////////// Messaging functions //////////////////////////////////////////////////////
+
+function readyToSend() {
+    downloaded = true;
+    console.log('Ready to send!');
+    socket.emit('sendy');
 }
 
-logError = err => {
+function sendMessage(message) {
+    socket.emit('message', message, partnerID);
+}
+
+function logError(err) {
     console.log('Error:', err);
 }
-
-/**********************************************************************************************/
-// Website Code
-/**********************************************************************************************/
-let imgUrls = [
-    'https://source.unsplash.com/3Z70SDuYs5g/800x600',
-    'https://source.unsplash.com/01vFmYAOqQ0/800x600',
-    'https://source.unsplash.com/2Bjq3A7rGn4/800x600',
-    'https://source.unsplash.com/t20pc32VbrU/800x600',
-    'https://source.unsplash.com/pHANr-CpbYM/800x600',
-    'https://source.unsplash.com/3PmwYw2uErY/800x600',
-    'https://source.unsplash.com/uOi3lg8fGl4/800x600',
-    'https://source.unsplash.com/CwkiN6_qpDI/800x600',
-    'https://source.unsplash.com/9O1oQ9SzQZQ/800x600',
-    'https://source.unsplash.com/E4944K_4SvI/800x600',
-    'https://source.unsplash.com/-hI5dX2ObAs/800x600',
-    'https://source.unsplash.com/vZlTg_McCDo/800x600'
-];
-
-imgUrls.map((url, index) => {
-    let div = document.createElement('div');
-    div.classList.add('column');
-    let img = document.createElement('img');
-    let rowClass = document.querySelector('.row');
-    rowClass.appendChild(div)
-    div.appendChild(img)
-    img.setAttribute('src', url);
-});
-/**********************************************************************************************/
