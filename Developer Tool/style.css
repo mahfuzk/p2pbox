@@ -29,7 +29,7 @@ body {
 .performance-graph-total {
   display: block;
   float: left;
-  height: 20px;
+  height: 50px;
   line-height: 20px;
   font-weight: bold
 }

@@ -33,13 +33,13 @@
 
     {
       'key': 'requestTime',
-      'label': 'Time to First Byte',
+      'label': 'Request Time',
       'calculation': 'Request to First Response'
     },
 
     {
       'key': 'responseTime',
-      'label': 'Server Latency',
+      'label': 'Response Time (Server Latency)',
       'calculation': 'Server Time For Content Downloads'
     }
   ];
@@ -56,7 +56,7 @@
           pageLoadTotalTime = result[0][PAGE_LOAD_KEY];
           let dataParent = document.getElementsByClassName('data')[0];
 
-          let node = chromeExtension.createRow("Total Server Time", pageLoadTotalTime, 0, pageLoadTotalTime);
+          let node = chromeExtension.createRow("Network/Server", pageLoadTotalTime, 0, pageLoadTotalTime);
           dataParent.appendChild(node);
 
           chromeExtension.incrementCounter();
