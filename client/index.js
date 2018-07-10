@@ -126,7 +126,6 @@ function receiveData() {
     }
   }
 }
-}
 
 function setImage(imageData, counter) {
   // console.log('In setImage');
